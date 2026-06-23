@@ -99,6 +99,7 @@ open class ExtensionProvider: NEPacketTunnelProvider {
     }
 
     override open func startTunnel(options startOptions: [String: NSObject]?) async throws {
+        KNLink.configDebugLog("[extension] startTunnel entered hasStartOptions=\(startOptions != nil)")
         let basePath: String
         let workingPath: String
         let tempPath: String
@@ -133,7 +134,9 @@ open class ExtensionProvider: NEPacketTunnelProvider {
         #endif
 
         let effectiveOptions = try resolveStartOptions(startOptions)
+        KNLink.configDebugLog("[extension] startTunnel resolvedOptions keys=\(Array(effectiveOptions.keys).sorted()) hasConfigContent=\(effectiveOptions["configContent"] != nil)")
         if effectiveOptions["configContent"] == nil {
+            KNLink.configDebugLog("[extension] startTunnel missing configContent before service setup")
             throw ExtensionStartupError("(packet-tunnel) error: missing configContent in tunnel options")
         }
         do {
@@ -227,7 +230,44 @@ open class ExtensionProvider: NEPacketTunnelProvider {
     }
 
     private func startService() async throws {
-        guard let configContent = tunnelOptions?["configContent"] as? String else {
+        // configContent 来源：
+        //  • KNLink 模式：优先用本机缓存的服务端加密配置启动；远程配置后台静默同步。
+        //  • 否则：沿用从 tunnelOptions 传入的 configContent。
+        var configContent: String
+        let knlinkMode = await SharedPreferences.knlinkMode.get()
+        let primaryDeviceID = await SharedPreferences.knlinkDeviceID.get()
+        let backupDeviceID = await SharedPreferences.knlinkDeviceIDBackup.get()
+        let knlinkDeviceID = primaryDeviceID.isEmpty ? backupDeviceID : primaryDeviceID
+        let useKNLink = knlinkMode || !knlinkDeviceID.isEmpty // 设备已激活即走 JIT，兜底 flag 未置上
+        var startedFromKNLinkCache = false
+        KNLink.configDebugLog("[extension] startService knlinkMode=\(knlinkMode) deviceID=\(knlinkDeviceID.isEmpty ? "<empty>" : knlinkDeviceID) useKNLink=\(useKNLink)")
+        if useKNLink {
+            let cachedContent: String?
+            do {
+                cachedContent = try await KNLink.fetchCachedConfigContentJIT()
+            } catch {
+                cachedContent = nil
+                KNLink.configDebugLog("[extension] startService cached config unavailable error=\(error)")
+            }
+            if let cachedContent {
+                configContent = cachedContent
+                startedFromKNLinkCache = true
+                KNLink.configDebugLog("[extension] startService KNLink mode using cached config bytes=\(configContent.utf8.count)")
+            } else {
+                KNLink.configDebugLog("[extension] startService KNLink cache unavailable; fetching remote config")
+                do {
+                    configContent = try await KNLink.fetchConfigContentJIT()
+                    KNLink.configDebugLog("[extension] startService fetched remote config bytes=\(configContent.utf8.count)")
+                } catch {
+                    KNLink.configDebugLog("[extension] startService failed to fetch remote config error=\(error)")
+                    throw ExtensionStartupError("(packet-tunnel) error: KNLink fetch config: \(error.localizedDescription)")
+                }
+            }
+        } else if let content = tunnelOptions?["configContent"] as? String {
+            KNLink.configDebugLog("[extension] startService KNLink mode disabled; using tunnel option config bytes=\(content.utf8.count)")
+            configContent = content
+        } else {
+            KNLink.configDebugLog("[extension] startService missing configContent in tunnel options")
             throw ExtensionStartupError("(packet-tunnel) error: missing configContent in tunnel options")
         }
 
@@ -235,7 +275,22 @@ open class ExtensionProvider: NEPacketTunnelProvider {
         do {
             try commandServer!.startOrReloadService(configContent, options: options)
         } catch {
-            throw ExtensionStartupError("(packet-tunnel) error: start service: \(error.localizedDescription)")
+            guard useKNLink, startedFromKNLinkCache else {
+                throw ExtensionStartupError("(packet-tunnel) error: start service: \(error.localizedDescription)")
+            }
+            KNLink.configDebugLog("[extension] startService cached config failed; fetching remote config and retrying error=\(error)")
+            do {
+                configContent = try await KNLink.fetchConfigContentJIT()
+                try commandServer!.startOrReloadService(configContent, options: options)
+                startedFromKNLinkCache = false
+                KNLink.configDebugLog("[extension] startService remote retry succeeded bytes=\(configContent.utf8.count)")
+            } catch {
+                KNLink.configDebugLog("[extension] startService remote retry failed error=\(error)")
+                throw ExtensionStartupError("(packet-tunnel) error: start service: \(error.localizedDescription)")
+            }
+        }
+        if useKNLink, startedFromKNLinkCache {
+            refreshKNLinkConfigInBackground(currentContent: configContent)
         }
         #if os(macOS)
             if !Variant.useSystemExtension, commandServer!.needWIFIState() {
@@ -245,6 +300,25 @@ open class ExtensionProvider: NEPacketTunnelProvider {
                 locationManager!.requestLocation()
             }
         #endif
+    }
+
+    private func refreshKNLinkConfigInBackground(currentContent: String) {
+        KNLink.configDebugLog("[extension] startService scheduling silent remote config sync")
+        Task { [weak self] in
+            do {
+                let freshContent = try await KNLink.fetchConfigContentJIT()
+                guard let self, let commandServer = self.commandServer else { return }
+                if freshContent == currentContent {
+                    KNLink.configDebugLog("[extension] silent remote config sync no change")
+                    return
+                }
+                let options = LibboxOverrideOptions()
+                try commandServer.startOrReloadService(freshContent, options: options)
+                KNLink.configDebugLog("[extension] silent remote config sync reloaded service bytes=\(freshContent.utf8.count)")
+            } catch {
+                KNLink.configDebugLog("[extension] silent remote config sync failed; keep cached config error=\(error)")
+            }
+        }
     }
 
     #if os(macOS)

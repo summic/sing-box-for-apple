@@ -182,7 +182,7 @@ public struct ImportRemoteProfileRequest: Hashable, Identifiable {
 
 @MainActor
 public class ExtensionEnvironments: ObservableObject {
-    @Published public var commandClient = CommandClient([.log, .status, .groups, .clashMode])
+    @Published public var commandClient = CommandClient([.log, .status, .groups, .clashMode, .connections])
     public let crashReportManager = CrashReportManager()
     public let oomReportManager = OOMReportManager()
     public var totalUnreadReportCount: Int {

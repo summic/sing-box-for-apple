@@ -3,17 +3,17 @@
 <plist version="1.0">
 <dict>
 	<key>Label</key>
-	<string>io.nekohasekai.sfavt.helper</string>
+	<string>com.happygame.knlink.helper</string>
 	<key>BundleProgram</key>
 	<string>Contents/Helpers/RootHelper</string>
 	<key>MachServices</key>
 	<dict>
-		<key>287TTNZF8L.io.nekohasekai.sfavt.helper</key>
+		<key>85NA69RS5S.com.happygame.knlink.helper</key>
 		<true/>
 	</dict>
 	<key>AssociatedBundleIdentifiers</key>
 	<array>
-		<string>io.nekohasekai.sfavt.standalone</string>
+		<string>com.happygame.knlink.standalone</string>
 	</array>
 	<key>RunAtLoad</key>
 	<true/>

@@ -80,7 +80,7 @@ private func captureWindowScreenshot(windowID: CGWindowID, to path: URL) -> Bool
 
 @MainActor
 private func windowID(for _: XCUIApplication) -> CGWindowID? {
-    guard let runningApp = NSRunningApplication.runningApplications(withBundleIdentifier: "io.nekohasekai.sfavt").first else {
+    guard let runningApp = NSRunningApplication.runningApplications(withBundleIdentifier: "com.happygame.knlink").first else {
         return nil
     }
     let pid = Int(runningApp.processIdentifier)

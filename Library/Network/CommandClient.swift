@@ -75,6 +75,287 @@ public struct TrafficSnapshot {
     }
 }
 
+private struct KNLinkConnectionSignal: Sendable {
+    enum EventKind: Sendable {
+        case opened
+        case updated
+        case closed
+    }
+
+    let kind: EventKind
+    let id: String
+    let domain: String
+    let destination: String
+    let createdAt: Int64
+    let closedAt: Int64
+    let uploadTotal: Int64
+    let downloadTotal: Int64
+    let outbound: String
+    let outboundType: String
+    let chain: [String]
+}
+
+private actor KNLinkSignalReporter {
+    static let shared = KNLinkSignalReporter()
+
+    private struct StatKey: Hashable {
+        let domain: String
+        let path: String
+    }
+
+    private struct StatAccumulator {
+        var ok = 0
+        var fail = 0
+    }
+
+    private struct ReportStat: Encodable {
+        let domain: String
+        let path: String
+        let ok: Int
+        let fail: Int
+    }
+
+    private struct ReportRecord: Encodable {
+        let domain: String
+        let action: String
+        let path: String
+        let bytes: Int64
+        let failed: Bool
+    }
+
+    private struct ReportBody: Encodable {
+        let window: String
+        let stats: [ReportStat]
+        let records: [ReportRecord]
+    }
+
+    private let minimumFlushInterval: TimeInterval = 300
+    private let urgentFlushDelay: TimeInterval = 30
+    private let maxBackoff: TimeInterval = 1800
+    private let maxRecords = 30
+    private let urgentStatCount = 120
+    private let urgentRecordCount = 30
+
+    private var activeSignals: [String: KNLinkConnectionSignal] = [:]
+    private var reportedClosedIds: [String] = []
+    private var reportedClosedIdSet = Set<String>()
+    private var stats: [StatKey: StatAccumulator] = [:]
+    private var records: [ReportRecord] = []
+    private var lastFlushAt: Date?
+    private var nextRetryAt: Date?
+    private var failureCount = 0
+    private var flushTask: Task<Void, Never>?
+    private var isFlushing = false
+
+    func ingest(_ signals: [KNLinkConnectionSignal]) async {
+        guard await SharedPreferences.knlinkMode.get(), !CommandTarget.isRemote else {
+            return
+        }
+        var closedCount = 0
+        for signal in signals {
+            switch signal.kind {
+            case .opened, .updated:
+                activeSignals[signal.id] = signal
+            case .closed:
+                if reportedClosedIdSet.contains(signal.id) {
+                    continue
+                }
+                let merged = mergeClosedSignal(signal)
+                activeSignals.removeValue(forKey: signal.id)
+                guard addClosedSignal(merged) else {
+                    continue
+                }
+                rememberClosedId(signal.id)
+                closedCount += 1
+            }
+        }
+        guard closedCount > 0 else { return }
+        scheduleFlush(urgent: stats.count >= urgentStatCount || records.count >= urgentRecordCount)
+    }
+
+    func flushSoon() async {
+        scheduleFlush(urgent: true)
+    }
+
+    private func mergeClosedSignal(_ signal: KNLinkConnectionSignal) -> KNLinkConnectionSignal {
+        guard let existing = activeSignals[signal.id] else { return signal }
+        return KNLinkConnectionSignal(
+            kind: .closed,
+            id: signal.id,
+            domain: signal.domain.isEmpty ? existing.domain : signal.domain,
+            destination: signal.destination.isEmpty ? existing.destination : signal.destination,
+            createdAt: signal.createdAt > 0 ? signal.createdAt : existing.createdAt,
+            closedAt: signal.closedAt > 0 ? signal.closedAt : existing.closedAt,
+            uploadTotal: max(signal.uploadTotal, existing.uploadTotal),
+            downloadTotal: max(signal.downloadTotal, existing.downloadTotal),
+            outbound: signal.outbound.isEmpty ? existing.outbound : signal.outbound,
+            outboundType: signal.outboundType.isEmpty ? existing.outboundType : signal.outboundType,
+            chain: signal.chain.isEmpty ? existing.chain : signal.chain
+        )
+    }
+
+    private func addClosedSignal(_ signal: KNLinkConnectionSignal) -> Bool {
+        guard signal.outboundType != "dns" else {
+            return false
+        }
+        guard let domain = normalizedDomain(from: signal) else {
+            return false
+        }
+        let route = routeInfo(for: signal)
+        let bytes = max(0, signal.uploadTotal) + max(0, signal.downloadTotal)
+        let failed = route.action != "block" && bytes == 0
+        if route.action != "block" {
+            let key = StatKey(domain: domain, path: route.path)
+            var current = stats[key] ?? StatAccumulator()
+            if failed {
+                current.fail += 1
+            } else {
+                current.ok += 1
+            }
+            stats[key] = current
+        }
+        if records.count >= maxRecords {
+            records.removeFirst(records.count - maxRecords + 1)
+        }
+        records.append(ReportRecord(domain: domain, action: route.action, path: route.path, bytes: bytes, failed: failed))
+        return true
+    }
+
+    private func normalizedDomain(from signal: KNLinkConnectionSignal) -> String? {
+        let candidates = [signal.domain, signal.destination]
+        for candidate in candidates {
+            let trimmed = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+            let host = trimmed
+                .components(separatedBy: ":")
+                .first?
+                .trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
+                .lowercased() ?? ""
+            guard host.contains("."), !host.allSatisfy({ $0.isNumber || $0 == "." }) else {
+                continue
+            }
+            return host
+        }
+        return nil
+    }
+
+    private func routeInfo(for signal: KNLinkConnectionSignal) -> (action: String, path: String) {
+        let outbound = signal.outbound.trimmingCharacters(in: .whitespacesAndNewlines)
+        let outboundType = signal.outboundType.trimmingCharacters(in: .whitespacesAndNewlines)
+        let chain = signal.chain.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        if outbound == "block" || outboundType == "block" || chain.contains("block") {
+            return ("block", "block")
+        }
+        if outbound == "direct" || outboundType == "direct" || chain.contains("direct") {
+            return ("direct", "direct")
+        }
+        let path = chain.first { $0 != "proxy" && $0 != "proxy-auto" } ?? outbound
+        return ("proxy", path.isEmpty ? "proxy" : path)
+    }
+
+    private func rememberClosedId(_ id: String) {
+        reportedClosedIds.append(id)
+        reportedClosedIdSet.insert(id)
+        if reportedClosedIds.count > 1000 {
+            let overflow = reportedClosedIds.count - 1000
+            let removed = reportedClosedIds.prefix(overflow)
+            reportedClosedIds.removeFirst(overflow)
+            for id in removed {
+                reportedClosedIdSet.remove(id)
+            }
+        }
+    }
+
+    private func scheduleFlush(urgent: Bool) {
+        guard !stats.isEmpty || !records.isEmpty else { return }
+        let now = Date()
+        let intervalDue = lastFlushAt?.addingTimeInterval(minimumFlushInterval) ?? now.addingTimeInterval(urgent ? urgentFlushDelay : minimumFlushInterval)
+        let retryDue = nextRetryAt ?? now
+        let baseDue = max(intervalDue, retryDue)
+        let due = urgent ? max(now.addingTimeInterval(urgentFlushDelay), retryDue) : baseDue
+        let delay = max(1, due.timeIntervalSince(now))
+        if flushTask != nil { return }
+        flushTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            await self?.flushIfPossible()
+        }
+    }
+
+    private func flushIfPossible() async {
+        flushTask = nil
+        guard !isFlushing, (!stats.isEmpty || !records.isEmpty) else { return }
+        if let nextRetryAt, Date() < nextRetryAt {
+            scheduleFlush(urgent: false)
+            return
+        }
+        isFlushing = true
+        let snapshotStats = stats
+        let snapshotRecords = records
+        do {
+            try await upload(stats: snapshotStats, records: snapshotRecords)
+            for (key, value) in snapshotStats {
+                guard var current = stats[key] else { continue }
+                current.ok -= value.ok
+                current.fail -= value.fail
+                if current.ok <= 0 && current.fail <= 0 {
+                    stats.removeValue(forKey: key)
+                } else {
+                    stats[key] = current
+                }
+            }
+            if records.count == snapshotRecords.count {
+                records.removeAll()
+            } else {
+                records.removeFirst(min(snapshotRecords.count, records.count))
+            }
+            failureCount = 0
+            nextRetryAt = nil
+            lastFlushAt = Date()
+        } catch {
+            failureCount += 1
+            let backoff = min(pow(2.0, Double(max(0, failureCount - 1))) * 60, maxBackoff)
+            nextRetryAt = Date().addingTimeInterval(backoff)
+            KNLink.configDebugLog("[report] upload failed failureCount=\(failureCount) nextRetrySeconds=\(Int(backoff)) error=\(error.localizedDescription)")
+        }
+        isFlushing = false
+        if !stats.isEmpty || !records.isEmpty {
+            scheduleFlush(urgent: false)
+        }
+    }
+
+    private func upload(stats snapshotStats: [StatKey: StatAccumulator], records snapshotRecords: [ReportRecord]) async throws {
+        let token = try await KNLink.ensureDeviceToken(deviceName: "iOS Device", deviceType: "singbox")
+        let serverBase = await SharedPreferences.knlinkServerBase.get()
+        guard let url = URL(string: "\(serverBase)/api/report") else {
+            throw URLError(.badURL)
+        }
+        let reportStats = snapshotStats.map { key, value in
+            ReportStat(domain: key.domain, path: key.path, ok: value.ok, fail: value.fail)
+        }
+        let body = ReportBody(window: Self.currentHourWindow(), stats: reportStats, records: snapshotRecords)
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.httpBody = try JSONEncoder().encode(body)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+        guard (200..<300).contains(status) else {
+            throw KNLink.ActivationError.badResponse(status, String(data: data, encoding: .utf8) ?? "")
+        }
+        KNLink.configDebugLog("[report] uploaded stats=\(reportStats.count) records=\(snapshotRecords.count)")
+    }
+
+    private static func currentHourWindow() -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyy-MM-dd HH:00"
+        return formatter.string(from: Date())
+    }
+}
+
 public class CommandClient: ObservableObject {
     public enum ConnectionType {
         case status
@@ -370,6 +651,9 @@ public class CommandClient: ObservableObject {
                 }
                 commandClient.isConnected = false
             }
+            Task {
+                await KNLinkSignalReporter.shared.flushSoon()
+            }
             if let message {
                 logger.debug("client disconnected: \(message)")
             }
@@ -489,6 +773,7 @@ public class CommandClient: ObservableObject {
             guard let events else {
                 return
             }
+            let signals = collectSignals(events)
             DispatchQueue.main.async { [self] in
                 guard isActiveConnection() else { return }
                 if commandClient.connectionsStore == nil {
@@ -499,6 +784,67 @@ public class CommandClient: ObservableObject {
                 commandClient.connections = result.connections
                 commandClient.hasAnyConnection = result.hasAny
             }
+            if !signals.isEmpty {
+                Task {
+                    await KNLinkSignalReporter.shared.ingest(signals)
+                }
+            }
+        }
+
+        private func collectSignals(_ events: LibboxConnectionEvents) -> [KNLinkConnectionSignal] {
+            guard !CommandTarget.isRemote else {
+                return []
+            }
+            guard let iterator = events.iterator() else {
+                return []
+            }
+            var signals: [KNLinkConnectionSignal] = []
+            while iterator.hasNext() {
+                guard let event = iterator.next() else { continue }
+                let kind: KNLinkConnectionSignal.EventKind
+                switch Int64(event.type) {
+                case LibboxConnectionEventNew:
+                    kind = .opened
+                case LibboxConnectionEventUpdate:
+                    kind = .updated
+                case LibboxConnectionEventClosed:
+                    kind = .closed
+                default:
+                    continue
+                }
+                guard let connection = event.connection else {
+                    if kind == .closed, !event.id_.isEmpty {
+                        signals.append(KNLinkConnectionSignal(
+                            kind: kind,
+                            id: event.id_,
+                            domain: "",
+                            destination: "",
+                            createdAt: 0,
+                            closedAt: event.closedAt,
+                            uploadTotal: event.uplinkDelta,
+                            downloadTotal: event.downlinkDelta,
+                            outbound: "",
+                            outboundType: "",
+                            chain: []
+                        ))
+                    }
+                    continue
+                }
+                signals.append(KNLinkConnectionSignal(
+                    kind: kind,
+                    id: connection.id_,
+                    domain: connection.domain,
+                    destination: connection.destination,
+                    createdAt: connection.createdAt,
+                    closedAt: max(connection.closedAt, event.closedAt),
+                    uploadTotal: max(connection.uplinkTotal, event.uplinkDelta),
+                    downloadTotal: max(connection.downlinkTotal, event.downlinkDelta),
+                    outbound: connection.outbound,
+                    outboundType: connection.outboundType,
+                    chain: connection.chain()?.toArray() ?? []
+                ))
+            }
+            return signals
         }
     }
 }

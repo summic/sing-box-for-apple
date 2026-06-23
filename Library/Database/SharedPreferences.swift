@@ -158,4 +158,43 @@ public enum SharedPreferences {
 
     public static let enabledDashboardCards = Preference<[String]>("enabled_dashboard_cards", defaultValue: [])
     public static let dashboardCardOrder = Preference<[String]>("dashboard_card_order", defaultValue: [])
+
+    // KNLink
+
+    /// 服务端地址（设置页可改）。生产默认指向 link.beforeve.com；本地调试可在设置页改回局域网 IP。
+    public static let knlinkServerBase = Preference<String>("knlink_server_base", defaultValue: "https://link.beforeve.com")
+    /// OAuth 登录后保存的会话/Bearer 令牌（激活与拉取配置时鉴权）
+    public static let knlinkSessionToken = Preference<String>("knlink_session_token", defaultValue: "")
+    /// KNLink 模式：开启后，隧道优先使用本机缓存的服务端加密配置启动，再静默同步远程配置。
+    public static let knlinkMode = Preference<Bool>("knlink_mode", defaultValue: false)
+    /// KN Account（Hydra）地址与移动端公有客户端 ID（PKCE 直连授权用）
+    public static let knlinkSsoBase = Preference<String>("knlink_sso_base", defaultValue: "https://account.beforeve.com")
+    public static let knlinkSsoMobileClientID = Preference<String>("knlink_sso_mobile_client_id", defaultValue: "kn-b4af6eff94ca")
+    /// Apple TV 设备码流程专用客户端 ID（device_code grant）
+    public static let knlinkSsoDeviceClientID = Preference<String>("knlink_sso_device_client_id", defaultValue: "kn-fd70857e7d1d")
+    /// 激活后服务端返回的设备 ID（配置请求带 ?device= 指明用哪台设备的公钥加密）
+    public static let knlinkDeviceID = Preference<String>("knlink_device_id", defaultValue: "")
+    /// 设备 ID 的永久备份。普通退出登录不能清理；用于修复旧版本误删主 deviceId 后的恢复。
+    public static let knlinkDeviceIDBackup = Preference<String>("knlink_device_id_backup", defaultValue: "")
+    /// 服务端颁发的设备上报令牌。用于 /api/report；普通退出登录不能清理。
+    public static let knlinkDeviceToken = Preference<String>("knlink_device_token", defaultValue: "")
+    /// 用户在分组列表里选中的配置 id（空=未选择，连接时不自动兜底）
+    public static let knlinkSelectedConfigID = Preference<String>("knlink_selected_config_id", defaultValue: "")
+    /// 全局模式下用户选中的节点 tag（=节点名）；空=未选择。仅对全局单份配置生效。
+    public static let knlinkSelectedNodeTag = Preference<String>("knlink_selected_node_tag", defaultValue: "")
+    /// 首页展示用的最近一次选择，避免远程列表同步前显示占位状态。
+    public static let knlinkSelectedDisplayName = Preference<String>("knlink_selected_display_name", defaultValue: "")
+    public static let knlinkSelectedDisplayRegion = Preference<String>("knlink_selected_display_region", defaultValue: "earth")
+    public static let knlinkSelectedDisplayMode = Preference<String>("knlink_selected_display_mode", defaultValue: "")
+    /// 当前可用配置的加密缓存。只保存服务端给本设备公钥加密后的 blob，不保存明文 sing-box 配置。
+    public static let knlinkCachedConfigID = Preference<String>("knlink_cached_config_id", defaultValue: "")
+    public static let knlinkCachedConfigURL = Preference<String>("knlink_cached_config_url", defaultValue: "")
+    public static let knlinkCachedConfigIsGlobal = Preference<Bool>("knlink_cached_config_is_global", defaultValue: false)
+    public static let knlinkCachedEncryptedConfig = Preference<String>("knlink_cached_encrypted_config", defaultValue: "")
+    public static let knlinkCachedConfigUpdatedAt = Preference<Double>("knlink_cached_config_updated_at", defaultValue: 0)
+    /// OIDC userinfo 缓存；过期时间与 access token 保持一致，避免每次进设置页都拉取。
+    public static let knlinkCachedUserInfo = Preference<[String: String]>("knlink_cached_user_info", defaultValue: [:])
+    public static let knlinkCachedUserInfoExpiry = Preference<Double>("knlink_cached_user_info_expiry", defaultValue: 0)
+    public static let knlinkCachedUserAvatarURL = Preference<String>("knlink_cached_user_avatar_url", defaultValue: "")
+    public static let knlinkCachedUserAvatarData = Preference<Data>("knlink_cached_user_avatar_data", defaultValue: Data())
 }

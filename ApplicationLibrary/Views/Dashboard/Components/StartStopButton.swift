@@ -156,14 +156,28 @@ public struct StartStopButton: View {
         }
 
         private nonisolated func switchProfile(_ isEnabled: Bool) async {
+            KNLink.configDebugLog("[start-stop] switchProfile isEnabled=\(isEnabled)")
             do {
                 if isEnabled {
-                    await MainActor.run { isStarting = true }
+                    await MainActor.run {
+                        isStarting = true
+                        KNLink.configDebugLog("[start-stop] calling profile.start statusBefore=\(profile.status.rawValue)")
+                    }
                     try await profile.start()
+                    await MainActor.run {
+                        KNLink.configDebugLog("[start-stop] profile.start returned statusAfter=\(profile.status.rawValue)")
+                    }
                 } else {
+                    await MainActor.run {
+                        KNLink.configDebugLog("[start-stop] calling profile.stop statusBefore=\(profile.status.rawValue)")
+                    }
                     try await profile.stop()
+                    await MainActor.run {
+                        KNLink.configDebugLog("[start-stop] profile.stop returned statusAfter=\(profile.status.rawValue)")
+                    }
                 }
             } catch {
+                KNLink.configDebugLog("[start-stop] switchProfile failed isEnabled=\(isEnabled) error=\(error)")
                 await MainActor.run {
                     isStarting = false
                     let action = isEnabled ? "start service" : "stop service"

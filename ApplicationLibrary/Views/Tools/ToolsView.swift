@@ -6,7 +6,6 @@ import SwiftUI
 public struct ToolsView: View {
     @EnvironmentObject private var environments: ExtensionEnvironments
     @EnvironmentObject private var peerStore: TailscaleSSHPeerStore
-    @StateObject private var viewModel = SettingViewModel()
     @StateObject private var tailscaleViewModel = TailscaleStatusViewModel()
     @StateObject private var usbipViewModel = USBIPStatusViewModel()
     #if os(macOS)
@@ -169,18 +168,6 @@ public struct ToolsView: View {
                             #endif
                         }
                     #endif
-                    FormTextItem("Taiwan Flag Available", "touchid") {
-                        if viewModel.isLoading {
-                            Text("Loading...")
-                                .onAppear {
-                                    Task.detached {
-                                        await viewModel.checkTaiwanFlagAvailability()
-                                    }
-                                }
-                        } else {
-                            Text(viewModel.taiwanFlagAvailable.toString())
-                        }
-                    }
                 }
             }
         }

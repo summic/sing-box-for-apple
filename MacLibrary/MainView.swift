@@ -58,9 +58,20 @@ public struct MainView: View {
     }
 
     public var body: some View {
+        if Variant.screenshotMode {
+            mainBody
+        } else {
+            // 与 iOS 一致：未登录 → KN Account 登录；登录后未激活 → 激活页；就绪 → 主界面
+            KNLinkSessionGate {
+                mainBody
+            }
+        }
+    }
+
+    private var mainBody: some View {
         NavigationSplitView {
             SidebarView(selection: $viewModel.selection)
-                .navigationSplitViewColumnWidth(150)
+                .navigationSplitViewColumnWidth(min: 208, ideal: 224, max: 280)
         } detail: {
             NavigationStack(path: $settingsNavigationPath) {
                 viewModel.selection.contentView
@@ -70,7 +81,7 @@ public struct MainView: View {
             .environment(\.settingsNavigationPath, $settingsNavigationPath)
             .navigationSplitViewColumnWidth(650)
         }
-        .frame(minHeight: Variant.screenshotMode ? 0 : 500)
+        .frame(minHeight: Variant.screenshotMode ? 0 : 760)
         .background(WindowAccessor { window in
             guard Variant.screenshotMode, !didConfigureScreenshotWindow, let window else { return }
             didConfigureScreenshotWindow = true
@@ -97,31 +108,6 @@ public struct MainView: View {
         }
         .alert($viewModel.alert)
         .globalChecks()
-        .toolbar {
-            if environments.remoteServer != nil || !remoteServers.isEmpty {
-                ToolbarItem(placement: .navigation) {
-                    remoteControlPicker
-                }
-            }
-            if environments.remoteServer != nil {
-                ToolbarItem(placement: .navigation) {
-                    disconnectButton
-                }
-            } else {
-                ToolbarItem(placement: .navigation) {
-                    StartStopButton()
-                }
-            }
-            if viewModel.selection == .dashboard {
-                ToolbarItem(placement: .automatic) {
-                    Button {
-                        showCardManagement = true
-                    } label: {
-                        Label("Dashboard Items", systemImage: "square.grid.2x2")
-                    }
-                }
-            }
-        }
         .onChangeCompat(of: controlActiveState) { newValue in
             Task { @MainActor in
                 viewModel.onControlActiveStateChange(newValue, environments: environments)

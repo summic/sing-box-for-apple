@@ -15,6 +15,15 @@ public enum AppConfiguration {
         return value
     }()
 
+    public static var keychainAccessGroup: String {
+        if let applicationIdentifier = Bundle.main.object(forInfoDictionaryKey: "AppIdentifier") as? String,
+           let dotIndex = applicationIdentifier.firstIndex(of: ".")
+        {
+            return "\(applicationIdentifier[..<dotIndex]).\(packageName)"
+        }
+        return "85NA69RS5S.\(packageName)"
+    }
+
     public static var teamID: String {
         guard let dotIndex = appGroupID.firstIndex(of: ".") else {
             fatalError("Invalid appGroupID format: \(appGroupID)")

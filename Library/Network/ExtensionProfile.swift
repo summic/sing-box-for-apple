@@ -163,7 +163,8 @@ public class ExtensionProfile: ObservableObject {
             connectedDate = Date()
             return
         }
-        guard let manager else { return }
+        KNLink.configDebugLog("[app] ExtensionProfile.start() entered")
+        guard let manager else { KNLink.configDebugLog("[app] start(): manager == nil, abort"); return }
         try await fetchProfile()
         manager.isEnabled = true
         let alwaysOn = await SharedPreferences.alwaysOn.get()
@@ -193,9 +194,21 @@ public class ExtensionProfile: ObservableObject {
                 }
             }
         #endif
-        try await manager.saveToPreferences()
+        do {
+            try await manager.saveToPreferences()
+            KNLink.configDebugLog("[app] start(): saveToPreferences ok")
+        } catch {
+            KNLink.configDebugLog("[app] start(): saveToPreferences FAILED: \(error)")
+            throw error
+        }
         let options = try await prepareStartOptions()
-        try manager.connection.startVPNTunnel(options: options)
+        do {
+            try manager.connection.startVPNTunnel(options: options)
+            KNLink.configDebugLog("[app] start(): startVPNTunnel invoked ok (status=\(manager.connection.status.rawValue))")
+        } catch {
+            KNLink.configDebugLog("[app] start(): startVPNTunnel FAILED: \(error)")
+            throw error
+        }
     }
 
     public func reloadService() async throws {
@@ -229,15 +242,31 @@ public class ExtensionProfile: ObservableObject {
             "manualStart": NSNumber(value: true),
         ]
 
-        let profileID = await SharedPreferences.selectedProfileID.get()
-        guard let profile = try await ProfileManager.get(profileID) else {
-            throw NSError(domain: "ExtensionProfile", code: -1, userInfo: [
-                NSLocalizedDescriptionKey: "Missing selected profile",
-            ])
+        let knlinkMode = await SharedPreferences.knlinkMode.get()
+        let primaryDeviceID = await SharedPreferences.knlinkDeviceID.get()
+        let backupDeviceID = await SharedPreferences.knlinkDeviceIDBackup.get()
+        let knlinkDeviceID = primaryDeviceID.isEmpty ? backupDeviceID : primaryDeviceID
+        let knlinkSelectedConfigID = await SharedPreferences.knlinkSelectedConfigID.get()
+        // 设备已激活（deviceID 非空）即视为 KNLink 模式，兜底 flag 没置上的情况
+        let useKNLink = knlinkMode || !knlinkDeviceID.isEmpty
+        KNLink.configDebugLog("[app] prepareStartOptions knlinkMode=\(knlinkMode) deviceID=\(knlinkDeviceID.isEmpty ? "<empty>" : knlinkDeviceID) selectedConfigID=\(knlinkSelectedConfigID.isEmpty ? "<empty>" : knlinkSelectedConfigID) useKNLink=\(useKNLink)")
+        if useKNLink {
+            // KNLink 模式（mode B）：无本地 profile。真实配置由扩展在 startService 时从加密缓存或远程加密响应解出。
+            // 这里只放占位，满足启动检查；持久化快照里只会写到这个占位，不含真实配置。
+            KNLink.configDebugLog("[app] prepareStartOptions -> KNLink branch (placeholder configContent)")
+            options["configContent"] = NSString(string: "{}")
+        } else {
+            let profileID = await SharedPreferences.selectedProfileID.get()
+            KNLink.configDebugLog("[app] prepareStartOptions -> PROFILE branch selectedProfileID=\(profileID)")
+            guard let profile = try await ProfileManager.get(profileID) else {
+                KNLink.configDebugLog("[app] prepareStartOptions PROFILE branch: no profile for id=\(profileID) -> throw Missing selected profile")
+                throw NSError(domain: "ExtensionProfile", code: -1, userInfo: [
+                    NSLocalizedDescriptionKey: "Missing selected profile",
+                ])
+            }
+            let configContent = try await profile.readAsync()
+            options["configContent"] = NSString(string: configContent)
         }
-
-        let configContent = try await profile.readAsync()
-        options["configContent"] = NSString(string: configContent)
 
         #if os(macOS)
             options["oomKillerEnabled"] = await NSNumber(value: SharedPreferences.oomKillerEnabled.get())

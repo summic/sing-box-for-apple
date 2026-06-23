@@ -137,10 +137,15 @@ public struct SidebarView: View {
     }
 
     public var body: some View {
+        navigation
+    }
+
+    @ViewBuilder
+    private var navigation: some View {
         if environments.remoteServer != nil {
             remoteContent
         } else if environments.extensionProfileLoading {
-            ProgressView()
+            ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if let profile = environments.extensionProfile {
             SidebarContentView(
                 selection: $selection,

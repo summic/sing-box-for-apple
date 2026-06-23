@@ -24,6 +24,16 @@
 				<string>sing-box</string>
 			</array>
 		</dict>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>CFBundleURLName</key>
+			<string>knlink</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>knlink</string>
+			</array>
+		</dict>
 	</array>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>

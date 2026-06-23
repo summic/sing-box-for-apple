@@ -169,6 +169,9 @@ public struct SettingView: View {
     public var body: some View {
         FormView {
             Section {
+                KNLinkAccountRow() // 顶部：头像 / 名字 / 邮箱 → 详情可退出登录
+            }
+            Section {
                 Tabs.app.navigationLink
                 Tabs.core.navigationLink
                 #if !os(tvOS)
@@ -187,41 +190,6 @@ public struct SettingView: View {
                     }
                 #endif
             }
-            #if !os(tvOS)
-                Section("About") {
-                    Link(destination: URL(string: String(localized: "https://sing-box.sagernet.org/"))!) {
-                        Label("Documentation", systemImage: "doc.on.doc.fill")
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundColor(.accentColor)
-                    .contextMenu {
-                        Link(destination: URL(string: String(localized: "https://sing-box.sagernet.org/changelog/"))!) {
-                            Text("Changelog")
-                        }
-                        Link(destination: URL(string: String(localized: "https://sing-box.sagernet.org/configuration/"))!) {
-                            Text("Configuration")
-                        }
-                    }
-                    Link(destination: URL(string: String("https://github.com/SagerNet/sing-box"))!) {
-                        Label("Source Code", systemImage: "pills.fill")
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundColor(.accentColor)
-                    .contextMenu {
-                        Link(destination: URL(string: String("https://github.com/SagerNet/sing-box/releases"))!) {
-                            Text("Releases")
-                        }
-                    }
-                    RequestReviewButton {
-                        Label("Rate on the App Store", systemImage: "text.bubble.fill")
-                    }
-                    #if os(macOS)
-                        if Variant.useSystemExtension {
-                            Tabs.sponsors.navigationLink
-                        }
-                    #endif
-                }
-            #endif
         }
         #if os(macOS)
         .formNavigationDestination(for: SettingsPage.self) { page in

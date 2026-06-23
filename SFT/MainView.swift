@@ -21,6 +21,17 @@ struct MainView: View {
     @State private var importRemoteProfile: LibboxImportRemoteProfile?
 
     var body: some View {
+        if Variant.screenshotMode {
+            mainBody
+        } else {
+            // 与 iOS 一致：未登录 → KN Account 登录；登录后未激活 → 激活页；就绪 → 主界面
+            KNLinkSessionGate {
+                mainBody
+            }
+        }
+    }
+
+    private var mainBody: some View {
         TabView(selection: $selection) {
             ForEach(NavigationPage.allCases, id: \.self) { page in
                 NavigationStackCompat {

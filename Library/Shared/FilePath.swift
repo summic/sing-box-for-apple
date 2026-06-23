@@ -4,10 +4,15 @@ public enum FilePath {
     public static let packageName = AppConfiguration.packageName
     public static let groupName = AppConfiguration.appGroupID
 
-    private static let defaultSharedDirectory: URL! = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: groupName)
+    #if DEBUG && targetEnvironment(simulator)
+        private static let defaultSharedDirectory: URL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: groupName)
+            ?? FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("Shared", isDirectory: true)
+    #else
+        private static let defaultSharedDirectory: URL! = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: groupName)
+    #endif
 
     #if os(iOS)
-        public static let sharedDirectory = defaultSharedDirectory!
+        public static let sharedDirectory: URL = defaultSharedDirectory
     #elseif os(tvOS)
         public static let sharedDirectory = defaultSharedDirectory
             .appendingPathComponent("Library", isDirectory: true)

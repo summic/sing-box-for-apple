@@ -49,6 +49,16 @@
 				<string>sing-box</string>
 			</array>
 		</dict>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>CFBundleURLName</key>
+			<string>knlink</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>knlink</string>
+			</array>
+		</dict>
 	</array>
 	<key>NSApplicationServices</key>
 	<dict>
@@ -131,9 +141,14 @@
 			</dict>
 		</dict>
 	</array>
-	<key>NSLocalNetworkUsageDescription</key>
-	<string>As a universal proxy platform, sing-box configures routing according to your configuration.</string>
-	<key>NSCameraUsageDescription</key>
-	<string>Camera access is required to scan QR codes for importing profiles.</string>
+		<key>NSLocalNetworkUsageDescription</key>
+		<string>As a universal proxy platform, sing-box configures routing according to your configuration.</string>
+		<key>NSAppTransportSecurity</key>
+		<dict>
+			<key>NSAllowsLocalNetworking</key>
+			<true/>
+		</dict>
+		<key>NSCameraUsageDescription</key>
+		<string>Camera access is required to scan QR codes for importing profiles.</string>
 </dict>
 </plist>

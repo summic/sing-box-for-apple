@@ -42,34 +42,65 @@ struct MainView: View {
         if Variant.screenshotMode {
             mainBody.preferredColorScheme(.dark)
         } else {
-            mainBody
+            // 未登录 → KN Account 登录；登录后未激活 → 激活页；就绪 → 主界面
+            KNLinkSessionGate {
+                mainBody
+            }
         }
     }
 
     @ViewBuilder
     private func tabContent(for page: NavigationPage) -> some View {
-        let content = page.contentView
+        let baseContent = page.contentView
             .navigationTitle(page.title)
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                accessoryInset
-                    .transaction { transaction in
-                        if !initializedTabs.contains(page) {
-                            transaction.disablesAnimations = true
-                        }
+
+        let content = Group {
+            if shouldShowAccessory(for: page) {
+                baseContent
+                    .safeAreaInset(edge: .bottom, spacing: 0) {
+                        accessoryInset
+                            .transaction { transaction in
+                                if !initializedTabs.contains(page) {
+                                    transaction.disablesAnimations = true
+                                }
+                            }
                     }
+            } else {
+                baseContent
             }
-            .onAppear {
-                if !initializedTabs.contains(page) {
-                    DispatchQueue.main.async {
-                        initializedTabs.insert(page)
-                    }
+        }
+        .onAppear {
+            if !initializedTabs.contains(page) {
+                DispatchQueue.main.async {
+                    initializedTabs.insert(page)
                 }
             }
+        }
+
+        #if os(iOS)
+            if page == .dashboard {
+                content.navigationBarHidden(true)
+            } else if page == .logs {
+                content.navigationBarTitleDisplayMode(.inline)
+            } else {
+                content
+            }
+        #else
         if page == .logs {
             content.navigationBarTitleDisplayMode(.inline)
         } else {
             content
         }
+        #endif
+    }
+
+    private func shouldShowAccessory(for page: NavigationPage) -> Bool {
+        #if os(iOS)
+            if page == .dashboard {
+                return false
+            }
+        #endif
+        return true
     }
 
     @ViewBuilder
@@ -325,10 +356,14 @@ struct MainView: View {
         var body: some View {
             Button {
                 guard let profile = environments.extensionProfile else { return }
+                KNLink.configDebugLog("[fab] start tapped statusBefore=\(profile.status.rawValue)")
                 Task {
                     do {
+                        KNLink.configDebugLog("[fab] calling profile.start")
                         try await profile.start()
+                        KNLink.configDebugLog("[fab] profile.start returned statusAfter=\(profile.status.rawValue)")
                     } catch {
+                        KNLink.configDebugLog("[fab] profile.start failed error=\(error)")
                         alert = AlertState(action: "start service", error: error)
                     }
                 }
