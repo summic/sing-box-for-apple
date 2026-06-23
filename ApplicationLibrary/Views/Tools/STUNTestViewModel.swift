@@ -3,6 +3,12 @@ import Libbox
 import Library
 import SwiftUI
 
+private let KNLinkDefaultSTUNServer = "stun.miwifi.com:3478"
+private let KNLinkLegacySTUNServers = Set([
+    "stun.voipgate.com:3478",
+    LibboxSTUNDefaultServer,
+])
+
 @MainActor
 public final class STUNTestViewModel: BaseViewModel, OutboundSelectable {
     @Published public var phase: Int32 = -1
@@ -14,7 +20,7 @@ public final class STUNTestViewModel: BaseViewModel, OutboundSelectable {
     @Published public var isRunning = false
     @Published public var selectedOutbound: String = "direct"
 
-    @Published public var server: String = LibboxSTUNDefaultServer {
+    @Published public var server: String = KNLinkDefaultSTUNServer {
         didSet {
             guard !isLoadingPreferences else { return }
             saveServerTask?.cancel()
@@ -85,7 +91,10 @@ public final class STUNTestViewModel: BaseViewModel, OutboundSelectable {
 
     private static func sanitizedServer(_ value: String) -> String {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return LibboxSTUNDefaultServer }
+        guard !trimmed.isEmpty else { return KNLinkDefaultSTUNServer }
+        if KNLinkLegacySTUNServers.contains(trimmed) {
+            return KNLinkDefaultSTUNServer
+        }
         return trimmed
     }
 
