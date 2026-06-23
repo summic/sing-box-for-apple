@@ -12,7 +12,7 @@ public final class STUNTestViewModel: BaseViewModel, OutboundSelectable {
     @Published public var natFiltering: Int32 = 0
     @Published public var natTypeSupported: Bool = false
     @Published public var isRunning = false
-    @Published public var selectedOutbound: String = ""
+    @Published public var selectedOutbound: String = "direct"
 
     @Published public var server: String = LibboxSTUNDefaultServer {
         didSet {
@@ -31,18 +31,12 @@ public final class STUNTestViewModel: BaseViewModel, OutboundSelectable {
     private var standaloneTest: LibboxSTUNTest?
     private var stunSession: LibboxSTUNTestSession?
     private var runningTask: Task<Void, Never>?
-    private static let knownProxyEndpoints = Set([
-        "106.75.169.134:443",
-    ])
 
     public func loadPreferences() async {
         isLoadingPreferences = true
         let saved = await SharedPreferences.stunServer.get()
         if !saved.isEmpty {
             server = Self.sanitizedServer(saved)
-            if server != saved {
-                await SharedPreferences.stunServer.set(server)
-            }
         }
         isLoadingPreferences = false
     }
@@ -54,10 +48,6 @@ public final class STUNTestViewModel: BaseViewModel, OutboundSelectable {
             Task {
                 await SharedPreferences.stunServer.set(validatedServer)
             }
-            alert = AlertState(
-                errorMessage: String(localized: "The STUN server was set to a KNLink proxy node. Proxy nodes do not answer STUN binding requests. It has been reset to \(validatedServer).")
-            )
-            return
         }
 
         phase = -1
@@ -96,26 +86,7 @@ public final class STUNTestViewModel: BaseViewModel, OutboundSelectable {
     private static func sanitizedServer(_ value: String) -> String {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return LibboxSTUNDefaultServer }
-        if let endpoint = endpointKey(trimmed), knownProxyEndpoints.contains(endpoint) {
-            return LibboxSTUNDefaultServer
-        }
         return trimmed
-    }
-
-    private static func endpointKey(_ value: String) -> String? {
-        if let url = URL(string: value), let host = url.host {
-            if let port = url.port {
-                return "\(host.lowercased()):\(port)"
-            }
-            return host.lowercased()
-        }
-        var raw = value
-        if let schemeRange = raw.range(of: "://") {
-            raw.removeSubrange(raw.startIndex ..< schemeRange.upperBound)
-        }
-        raw = raw.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        guard !raw.isEmpty else { return nil }
-        return raw.lowercased()
     }
 
     public func cancel() {
